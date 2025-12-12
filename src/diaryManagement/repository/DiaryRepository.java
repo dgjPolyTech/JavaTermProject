@@ -7,14 +7,21 @@ import java.sql.*;
 import java.util.ArrayList;
 
 public class DiaryRepository {
+
+    // 현재 로그인한 사용자 (테스트용 6번)
     private final int MY_USER_NO = 6;
 
     public ArrayList<DiaryVO> select(String searchWord, int selectedIndex) {
         Connection con = JDBCConnector.getConnection();
         ArrayList<DiaryVO> list = new ArrayList<>();
-        String[] cols = {"title", "content"};
-        String sql = "SELECT * FROM DIARIES WHERE writer_no = " + MY_USER_NO +
-                " AND " + cols[selectedIndex] + " LIKE ? ORDER BY diary_no DESC";
+        String[] cols = {"d.title", "d.content"}; // 일기 테이블(d)의 제목, 내용
+
+        String sql = "SELECT d.* " +
+                "FROM DIARIES d " +
+                "JOIN DIARY_BOX b ON d.diary_no = b.diary_no " +
+                "WHERE b.owner_no = " + MY_USER_NO +
+                " AND " + cols[selectedIndex] + " LIKE ? " +
+                "ORDER BY d.diary_no DESC";
 
         try {
             PreparedStatement pstmt = con.prepareStatement(sql);
@@ -31,27 +38,66 @@ public class DiaryRepository {
                 vo.setContent(rs.getString("content"));
                 list.add(vo);
             }
-            if(rs!=null) rs.close(); if(pstmt!=null) pstmt.close(); if(con!=null) con.close();
+            if(rs!=null) rs.close();
+            if(pstmt!=null) pstmt.close();
+            if(con!=null) con.close();
         } catch (Exception e) { e.printStackTrace(); }
         return list;
     }
 
     public void insert(DiaryVO vo) {
         Connection con = JDBCConnector.getConnection();
-        String sql = "INSERT INTO DIARIES (writer_no, category_no, title, day, weather, emotion, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, SYSDATE)";
+        PreparedStatement pstmt = null;
+        ResultSet rs = null;
+
         try {
-            PreparedStatement pstmt = con.prepareStatement(sql);
+            con.setAutoCommit(false);
+
+            String sqlDiary = "INSERT INTO DIARIES (writer_no, category_no, title, day, weather, emotion, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, SYSDATE)";
+            pstmt = con.prepareStatement(sqlDiary);
             pstmt.setInt(1, MY_USER_NO);
-            pstmt.setInt(2, vo.getCategoryNo()); // 주제 번호 저장
+            pstmt.setInt(2, vo.getCategoryNo());
             pstmt.setString(3, vo.getTitle());
             pstmt.setString(4, vo.getDay());
             pstmt.setString(5, vo.getWeather());
             pstmt.setString(6, vo.getEmotion());
             pstmt.setString(7, vo.getContent());
             pstmt.executeUpdate();
+            pstmt.close();
 
-            if(pstmt!=null) pstmt.close(); if(con!=null) con.close();
-        } catch (Exception e) { e.printStackTrace(); }
+            int newDiaryNo = 0;
+            String sqlMax = "SELECT MAX(diary_no) FROM DIARIES";
+            pstmt = con.prepareStatement(sqlMax);
+            rs = pstmt.executeQuery();
+            if(rs.next()) {
+                newDiaryNo = rs.getInt(1);
+            }
+            rs.close();
+            pstmt.close();
+
+            if(newDiaryNo > 0) {
+                String sqlBox = "INSERT INTO DIARY_BOX (owner_no, diary_no, type, is_important, add_date, created_at) VALUES (?, ?, 'm', 0, SYSDATE, SYSDATE)";
+                pstmt = con.prepareStatement(sqlBox);
+                pstmt.setInt(1, MY_USER_NO);
+                pstmt.setInt(2, newDiaryNo);
+                pstmt.executeUpdate();
+            }
+
+            con.commit();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            try {
+                if(con != null) con.rollback(); // 에러나면 취소
+            } catch(SQLException ex) {}
+        } finally {
+            try {
+                if(con != null) con.setAutoCommit(true);
+                if(pstmt != null) pstmt.close();
+                if(rs != null) rs.close();
+                if(con != null) con.close();
+            } catch(Exception e) {}
+        }
     }
 
     public void update(DiaryVO vo) {
@@ -66,18 +112,40 @@ public class DiaryRepository {
             pstmt.setInt(5, vo.getDiaryNo());
             pstmt.executeUpdate();
 
-            if(pstmt!=null) pstmt.close(); if(con!=null) con.close();
+            if(pstmt!=null) pstmt.close();
+            if(con!=null) con.close();
         } catch (Exception e) { e.printStackTrace(); }
     }
 
     public void delete(int diaryNo) {
         Connection con = JDBCConnector.getConnection();
-        String sql = "DELETE FROM DIARIES WHERE diary_no=? AND writer_no=" + MY_USER_NO;
+        PreparedStatement pstmt = null;
+
         try {
-            PreparedStatement pstmt = con.prepareStatement(sql);
+            con.setAutoCommit(false);
+
+            String sqlBox = "DELETE FROM DIARY_BOX WHERE diary_no=? AND owner_no=" + MY_USER_NO;
+            pstmt = con.prepareStatement(sqlBox);
             pstmt.setInt(1, diaryNo);
             pstmt.executeUpdate();
-            if(pstmt!=null) pstmt.close(); if(con!=null) con.close();
-        } catch (Exception e) { e.printStackTrace(); }
+            pstmt.close();
+
+            String sqlDiary = "DELETE FROM DIARIES WHERE diary_no=? AND writer_no=" + MY_USER_NO;
+            pstmt = con.prepareStatement(sqlDiary);
+            pstmt.setInt(1, diaryNo);
+            pstmt.executeUpdate();
+
+            con.commit();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            try { if(con != null) con.rollback(); } catch(SQLException ex) {}
+        } finally {
+            try {
+                if(con != null) con.setAutoCommit(true);
+                if(pstmt != null) pstmt.close();
+                if(con != null) con.close();
+            } catch(Exception e) {}
+        }
     }
 }
